@@ -11,7 +11,6 @@ import os
 import mmcv
 import tqdm
 
-
 def add_frame(nuscenes, sample_data, e2g_t, l2e_t, l2e_r_mat, e2g_r_mat, data_root):
     """Helper function to process sensor data for a frame."""
     sweep_cam = dict()
@@ -137,13 +136,9 @@ def main():
     data_root = "/data/Dataset/nuScenes/"
     num_prev = 5  ###nummber of previous key frames
     num_sweep = 5  ###nummber of sweep frames between two key frame
-    
-    # Ensure data root exists
-    if not os.path.isdir(data_root):
-        print(f"Error: Data root directory not found: {data_root}")
-        return
 
-    generate_sweep_info(info_prefix, data_root, num_prev, num_sweep, sensors)
+    for info_prefix in ['train', 'val']:
+        generate_sweep_info(info_prefix, data_root, num_prev, num_sweep, sensors)
 
 if __name__ == '__main__':
     main()
