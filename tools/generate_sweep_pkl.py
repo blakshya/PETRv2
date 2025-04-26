@@ -10,24 +10,10 @@ import numpy as np
 import os
 import mmcv
 import tqdm
-sensors = ['CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_RIGHT', 'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_FRONT_LEFT']
-info_prefix = 'train'
-# info_prefix = 'val'
-# info_prefix = 'test'
-data_root = "/data/Dataset/nuScenes/"
-num_prev = 5  ###nummber of previous key frames
-num_sweep = 5  ###nummber of sweep frames between two key frame
 
-# info_path = os.path.join(data_root,'nuscenes_infos_30f_infos_{}.pkl'.format(info_prefix))
-info_path = os.path.join(data_root,'mmdet3d_nuscenes_30f_infos_{}.pkl'.format(info_prefix))
-key_infos = pickle.load(open(os.path.join(data_root,'nuscenes_infos_{}.pkl'.format(info_prefix)), 'rb'))
-if info_prefix == 'test':
-    nuscenes_version = 'v1.0-test'
-else:
-    nuscenes_version = 'v1.0-trainval'
-nuscenes = NuScenes(nuscenes_version, data_root)
 
-def add_frame(sample_data, e2g_t, l2e_t, l2e_r_mat, e2g_r_mat):
+def add_frame(nuscenes, sample_data, e2g_t, l2e_t, l2e_r_mat, e2g_r_mat, data_root):
+    """Helper function to process sensor data for a frame."""
     sweep_cam = dict()
     sweep_cam['is_key_frame'] = sample_data['is_key_frame']
     sweep_cam['data_path'] = os.path.join(data_root, sample_data['filename'])
@@ -77,46 +63,87 @@ def add_frame(sample_data, e2g_t, l2e_t, l2e_r_mat, e2g_r_mat):
 
     return sweep_cam
 
-for current_id in tqdm.tqdm(range(len(key_infos['infos']))):
-    ###parameters of current key frame 
-    e2g_t = key_infos['infos'][current_id]['ego2global_translation']
-    e2g_r = key_infos['infos'][current_id]['ego2global_rotation']
-    l2e_t = key_infos['infos'][current_id]['lidar2ego_translation']
-    l2e_r = key_infos['infos'][current_id]['lidar2ego_rotation']
-    l2e_r_mat = Quaternion(l2e_r).rotation_matrix
-    e2g_r_mat = Quaternion(e2g_r).rotation_matrix
+def generate_sweep_info(info_prefix, data_root, num_prev, num_sweep, sensors):
+    """Generates sweep information and adds it to the info file."""
+    # info_path = os.path.join(data_root,'nuscenes_infos_30f_infos_{}.pkl'.format(info_prefix)) # Original path
+    output_info_path = os.path.join(data_root,'mmdet3d_nuscenes_30f_infos_{}_sweep.pkl'.format(info_prefix)) # Output path with sweeps
+    key_info_path = os.path.join(data_root,'nuscenes_infos_{}.pkl'.format(info_prefix)) # Input key frame info path
 
-    sample = nuscenes.get('sample', key_infos['infos'][current_id]['token']) # {'token': 'c0be823ae8f040e2b3306002c571ae57', 'timestamp': 1533153861447131, 'prev': 'e866142822bb421d87d8f9bd1b91fbc3', 'next': 'f32d3a2842004926b41985152fa1bfad', 'scene_token': 'bc6a757d637f4832be68986833ec17ac', 'data': {'RADAR_FRONT': '85962dfd390843bab8cbedc9003a5d81', 'RADAR_FRONT_LEFT': '35e35910a6f8428ea1e3f71db59f0ed7', 'RADAR_FRONT_RIGHT': 'a557a223830d4f7db59a9bf03425c52d', 'RADAR_BACK_LEFT': '46b86e2060e341dabb14396a8edc1653', 'RADAR_BACK_RIGHT': '7e7b5ad41eff4f949d69b3ef6d65f991', 'LIDAR_TOP': '5a0aa6326b004322bf009388f4df33df', 'CAM_FRONT': 'a5c43d3424bd406ba1a0a3d1d1493277', 'CAM_FRONT_RIGHT': '38ee6078f2594c5cb3bea00956d3afeb', 'CAM_BACK_RIGHT': '082193ef4dff4dca9ff7af18493107f5', 'CAM_BACK': 'aec2027af4e243b591cf22459735644e', 'CAM_BACK_LEFT': 'd6c479b792674d8db1a5de86af2b9183', 'CAM_FRONT_LEFT': '451c4acac4534a0da20e652ba49a14a2'}, 'anns': []}
-    current_cams = dict() ###cam of current key frame
-    for cam in sensors:
-        current_cams[cam] = nuscenes.get('sample_data', sample['data'][cam]) ##{'token': '8e25cfcd8f724bb7bbce69bff042a56f', 'sample_token': '02fd302178dd44568ae305320ea24054', 'ego_pose_token': '8e25cfcd8f724bb7bbce69bff042a56f', 'calibrated_sensor_token': '2fde3d3376ea42a8a561df595e001cc7', 'timestamp': 1533153859904816, 'fileformat': 'jpg', 'is_key_frame': True, 'height': 900, 'width': 1600, 'filename': 'samples/CAM_FRONT_LEFT/n008-2018-08-01-16-03-27-0400__CAM_FRONT_LEFT__1533153859904816.jpg', 'prev': '5d82f148ba8947579a6d7647ac73a9d6', 'next': 'cb0a1671873647faba28916a88b14574', 'sensor_modality': 'camera', 'channel': 'CAM_FRONT_LEFT'}
-   
-    sweep_lists = []
-    for i in range(num_prev):  #### previous sweep frame  
-        ### justify the first frame of a scene
-        if sample['prev'] == '': 
-            break
-        ###add sweep frame between two key frame
-        for j in range(num_sweep): 
+    print(f"Loading key frame infos from: {key_info_path}")
+    key_infos = pickle.load(open(key_info_path, 'rb'))
+
+    if info_prefix == 'test':
+        nuscenes_version = 'v1.0-test'
+    else:
+        nuscenes_version = 'v1.0-trainval'
+
+    print(f"Initializing NuScenes SDK for version: {nuscenes_version}")
+    nuscenes = NuScenes(nuscenes_version, data_root)
+
+    print(f"Processing {len(key_infos['infos'])} key frames...")
+    for current_id in tqdm.tqdm(range(len(key_infos['infos']))):
+        ###parameters of current key frame 
+        e2g_t = key_infos['infos'][current_id]['ego2global_translation']
+        e2g_r = key_infos['infos'][current_id]['ego2global_rotation']
+        l2e_t = key_infos['infos'][current_id]['lidar2ego_translation']
+        l2e_r = key_infos['infos'][current_id]['lidar2ego_rotation']
+        l2e_r_mat = Quaternion(l2e_r).rotation_matrix
+        e2g_r_mat = Quaternion(e2g_r).rotation_matrix
+
+        sample = nuscenes.get('sample', key_infos['infos'][current_id]['token']) # {'token': 'c0be823ae8f040e2b3306002c571ae57', 'timestamp': 1533153861447131, 'prev': 'e866142822bb421d87d8f9bd1b91fbc3', 'next': 'f32d3a2842004926b41985152fa1bfad', 'scene_token': 'bc6a757d637f4832be68986833ec17ac', 'data': {'RADAR_FRONT': '85962dfd390843bab8cbedc9003a5d81', 'RADAR_FRONT_LEFT': '35e35910a6f8428ea1e3f71db59f0ed7', 'RADAR_FRONT_RIGHT': 'a557a223830d4f7db59a9bf03425c52d', 'RADAR_BACK_LEFT': '46b86e2060e341dabb14396a8edc1653', 'RADAR_BACK_RIGHT': '7e7b5ad41eff4f949d69b3ef6d65f991', 'LIDAR_TOP': '5a0aa6326b004322bf009388f4df33df', 'CAM_FRONT': 'a5c43d3424bd406ba1a0a3d1d1493277', 'CAM_FRONT_RIGHT': '38ee6078f2594c5cb3bea00956d3afeb', 'CAM_BACK_RIGHT': '082193ef4dff4dca9ff7af18493107f5', 'CAM_BACK': 'aec2027af4e243b591cf22459735644e', 'CAM_BACK_LEFT': 'd6c479b792674d8db1a5de86af2b9183', 'CAM_FRONT_LEFT': '451c4acac4534a0da20e652ba49a14a2'}, 'anns': []}
+        current_cams = dict() ###cam of current key frame
+        for cam in sensors:
+            current_cams[cam] = nuscenes.get('sample_data', sample['data'][cam]) ##{'token': '8e25cfcd8f724bb7bbce69bff042a56f', 'sample_token': '02fd302178dd44568ae305320ea24054', 'ego_pose_token': '8e25cfcd8f724bb7bbce69bff042a56f', 'calibrated_sensor_token': '2fde3d3376ea42a8a561df595e001cc7', 'timestamp': 1533153859904816, 'fileformat': 'jpg', 'is_key_frame': True, 'height': 900, 'width': 1600, 'filename': 'samples/CAM_FRONT_LEFT/n008-2018-08-01-16-03-27-0400__CAM_FRONT_LEFT__1533153859904816.jpg', 'prev': '5d82f148ba8947579a6d7647ac73a9d6', 'next': 'cb0a1671873647faba28916a88b14574', 'sensor_modality': 'camera', 'channel': 'CAM_FRONT_LEFT'}
+    
+        sweep_lists = []
+        for i in range(num_prev):  #### previous sweep frame  
+            ### justify the first frame of a scene
+            if sample['prev'] == '': 
+                break
+            ###add sweep frame between two key frame
+            for j in range(num_sweep): 
+                sweep_cams = dict()
+                for cam in sensors: 
+                    if current_cams[cam]['prev'] == '':    
+                        sweep_cams = sweep_lists[-1] 
+                        break
+                    sample_data = nuscenes.get('sample_data', current_cams[cam]['prev']) ##{'token': '8e25cfcd8f724bb7bbce69bff042a56f', 'sample_token': '02fd302178dd44568ae305320ea24054', 'ego_pose_token': '8e25cfcd8f724bb7bbce69bff042a56f', 'calibrated_sensor_token': '2fde3d3376ea42a8a561df595e001cc7', 'timestamp': 1533153859904816, 'fileformat': 'jpg', 'is_key_frame': True, 'height': 900, 'width': 1600, 'filename': 'samples/CAM_FRONT_LEFT/n008-2018-08-01-16-03-27-0400__CAM_FRONT_LEFT__1533153859904816.jpg', 'prev': '5d82f148ba8947579a6d7647ac73a9d6', 'next': 'cb0a1671873647faba28916a88b14574', 'sensor_modality': 'camera', 'channel': 'CAM_FRONT_LEFT'}
+                    sweep_cam = add_frame(nuscenes, sample_data, e2g_t, l2e_t, l2e_r_mat, e2g_r_mat,data_root)
+                    current_cams[cam] = sample_data
+                    sweep_cams[cam] = sweep_cam
+                sweep_lists.append(sweep_cams)
+            ###add previous key frame
+            sample = nuscenes.get('sample', sample['prev'])
             sweep_cams = dict()
-            for cam in sensors: 
-                if current_cams[cam]['prev'] == '':    
-                    sweep_cams = sweep_lists[-1] 
-                    break
-                sample_data = nuscenes.get('sample_data', current_cams[cam]['prev']) ##{'token': '8e25cfcd8f724bb7bbce69bff042a56f', 'sample_token': '02fd302178dd44568ae305320ea24054', 'ego_pose_token': '8e25cfcd8f724bb7bbce69bff042a56f', 'calibrated_sensor_token': '2fde3d3376ea42a8a561df595e001cc7', 'timestamp': 1533153859904816, 'fileformat': 'jpg', 'is_key_frame': True, 'height': 900, 'width': 1600, 'filename': 'samples/CAM_FRONT_LEFT/n008-2018-08-01-16-03-27-0400__CAM_FRONT_LEFT__1533153859904816.jpg', 'prev': '5d82f148ba8947579a6d7647ac73a9d6', 'next': 'cb0a1671873647faba28916a88b14574', 'sensor_modality': 'camera', 'channel': 'CAM_FRONT_LEFT'}
+            for cam in sensors:
+                sample_data = nuscenes.get('sample_data', sample['data'][cam])
                 sweep_cam = add_frame(sample_data, e2g_t, l2e_t, l2e_r_mat, e2g_r_mat)
                 current_cams[cam] = sample_data
                 sweep_cams[cam] = sweep_cam
             sweep_lists.append(sweep_cams)
-        ###add previous key frame
-        sample = nuscenes.get('sample', sample['prev'])
-        sweep_cams = dict()
-        for cam in sensors:
-            sample_data = nuscenes.get('sample_data', sample['data'][cam])
-            sweep_cam = add_frame(sample_data, e2g_t, l2e_t, l2e_r_mat, e2g_r_mat)
-            current_cams[cam] = sample_data
-            sweep_cams[cam] = sweep_cam
-        sweep_lists.append(sweep_cams)
-    key_infos['infos'][current_id]['sweeps'] = sweep_lists
+        key_infos['infos'][current_id]['sweeps'] = sweep_lists
 
-mmcv.dump(key_infos, info_path)
+    print(f"Saving infos with sweeps to: {output_info_path}")
+    mmcv.dump(key_infos, output_info_path)
+    print("Finished generating sweep info.")
+
+def main():
+    sensors = ['CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_RIGHT', 'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_FRONT_LEFT']
+
+    # Configuration
+    info_prefix = 'train'
+    # info_prefix = 'val'
+    # info_prefix = 'test'
+    data_root = "/data/Dataset/nuScenes/"
+    num_prev = 5  ###nummber of previous key frames
+    num_sweep = 5  ###nummber of sweep frames between two key frame
+    
+    # Ensure data root exists
+    if not os.path.isdir(data_root):
+        print(f"Error: Data root directory not found: {data_root}")
+        return
+
+    generate_sweep_info(info_prefix, data_root, num_prev, num_sweep, sensors)
+
+if __name__ == '__main__':
+    main()
