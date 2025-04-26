@@ -7,6 +7,18 @@ examples：
 ```bash
 pip install mmcv-full==1.4.0 -f https://download.openmmlab.com/mmcv/dist/cu111/torch1.9.0/index.html
 ```
+
+Not all GPU drivers are available. So doing this makes sure we have them
+```bash
+git clone https://github.com/open-mmlab/mmcv.git
+cd mmcv
+git checkout v1.4.0  # Match PETRv2 requirements
+
+# Build with Pascal architecture support
+export TORCH_CUDA_ARCH_LIST="6.0"
+export FORCE_CUDA=1
+MMCV_WITH_OPS=1 pip install -e .
+```
 ## Install MMDetection
 
 ```bash
