@@ -14,34 +14,109 @@ import os
 
 @DATASETS.register_module()
 class AdaptiveNuScenesDataset(NuScenesDataset):
-    r"""NuScenes Dataset.
-    This datset only add camera intrinsics and extrinsics to the results.
+    r"""NuScenes Dataset with multi-frame temporal support.
+    
+    This implementation extends NuScenesDataset to support loading multiple consecutive frames
+    with temporal consistency tracking for adaptive weighting between frames.
     """
+
+    def __init__(self, num_frames=3, **kwargs):
+        super().__init__(**kwargs)
+        self.num_frames = num_frames
+        self.dummy_stats = {'total': 0, 'per_offset': {i:0 for i in range(1, num_frames)}}
+    
+    def prepare_train_data(self, index):
+        """Load data with multiple previous frames for training"""
+        input_dict = self.get_data_info(index)
+
+        if 'bbox3d_fields' not in input_dict:
+            input_dict['bbox3d_fields'] = []
+        
+        # Load previous frames
+        prev_frames = []
+        for offset in range(1, self.num_frames):
+            prev_idx = index - offset
+            valid_frame = False
+            
+            if prev_idx >= 0:
+                try:
+                    prev_info = self.get_data_info(prev_idx)
+                    time_diff = abs(input_dict['timestamp'] - prev_info['timestamp'])
+                    # Check if frames are temporally consistent
+                    if time_diff <= 0.5:
+                        valid_frame = True
+                        prev_frames.append(prev_info)
+                except:
+                    valid_frame = False
+            
+            if not valid_frame:
+                # Create dummy frame
+                dummy = copy.deepcopy(input_dict)
+                dummy['timestamp'] -= offset * 0.5
+                # Clear sweeps for dummy frames
+                dummy['sweeps'] = []
+                prev_frames.append(dummy)
+                self.dummy_stats['total'] += 1
+                self.dummy_stats['per_offset'][offset] += 1
+        
+        input_dict['prev_frames'] = prev_frames
+        return self.pipeline(input_dict)
+    
+    def prepare_test_data(self, index):
+        """Load data for testing with previous frames"""
+        input_dict = self.get_data_info(index)
+
+        if 'bbox3d_fields' not in input_dict:
+            input_dict['bbox3d_fields'] = []
+        
+        # Also load previous frames for testing
+        prev_frames = []
+        for offset in range(1, self.num_frames):
+            prev_idx = index - offset
+            valid_frame = False
+            
+            if prev_idx >= 0:
+                try:
+                    prev_info = self.get_data_info(prev_idx)
+                    time_diff = abs(input_dict['timestamp'] - prev_info['timestamp'])
+                    # Check temporal consistency
+                    if time_diff <= 0.5:
+                        valid_frame = True
+                        prev_frames.append(prev_info)
+                except:
+                    valid_frame = False
+            
+            if not valid_frame:
+                # Create dummy frame
+                dummy = copy.deepcopy(input_dict)
+                dummy['timestamp'] -= offset * 0.5
+                # Clear sweeps for dummy frames
+                dummy['sweeps'] = []
+                prev_frames.append(dummy)
+        
+        input_dict['prev_frames'] = prev_frames
+        return self.pipeline(input_dict)
+
     def get_data_info(self, index):
         """Get data info according to the given index.
+        
         Args:
             index (int): Index of the sample data to get.
         Returns:
-            dict: Data information that will be passed to the data \
-                preprocessing pipelines. It includes the following keys:
-
-                - sample_idx (str): Sample index.
-                - pts_filename (str): Filename of point clouds.
-                - sweeps (list[dict]): Infos of sweeps.
-                - timestamp (float): Sample timestamp.
-                - img_filename (str, optional): Image filename.
-                - lidar2img (list[np.ndarray], optional): Transformations \
-                    from lidar to different cameras.
-                - ann_info (dict): Annotation info.
+            dict: Data information that will be passed to the data preprocessing pipelines.
         """
         info = self.data_infos[index]
         # standard protocal modified from SECOND.Pytorch
         input_dict = dict(
             sample_idx=info['token'],
             pts_filename=info['lidar_path'],
-            sweeps=info['sweeps'],
+            sweeps=info['sweeps'],  # Keep original sweep handling
             timestamp=info['timestamp'] / 1e6,
         )
+
+        # Add scene token if available in original data
+        if 'scene_token' in info:
+            input_dict['scene_token'] = info['scene_token']
 
         if self.modality['use_camera']:
             image_paths = []
